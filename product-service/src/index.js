@@ -5,6 +5,7 @@ const PORT = process.env.PORT_ONE || 7071;
 const isAuthenticated = require("../../auth-middleware/isAuthenticated");
 
 const amqp = require("amqplib");
+var order;
 var channel, connection;
 const mongoose = require("mongoose");
 const Product = require("./models/Product");
@@ -45,7 +46,7 @@ async function connectAmqp() {
   const amqpServer = "amqp://localhost:5672";
   connection = await amqp.connect(amqpServer);
   channel = await connection.createChannel();
-  await channel.assertQueue("PRODUCT");
+  await channel.assertQueue("PRODUCT"); // Creates a Queue PRODUCT if it doesnt exist
 }
 
 connectAmqp();
@@ -53,6 +54,7 @@ connectAmqp();
 app.post("/product/buy", isAuthenticated, async (req, res) => {
   const { ids } = req.body;
   const products = await Product.find({ _id: { $in: ids } });
+  // sending data payload to the ORDER queue from the product service
   channel.sendToQueue(
     "ORDER",
     Buffer.from(
@@ -63,12 +65,14 @@ app.post("/product/buy", isAuthenticated, async (req, res) => {
     )
   );
   channel.consume("PRODUCT", (data) => {
+    console.log("Consuming PRODUCT Queue from Order Service");
     order = JSON.parse(data.content);
+    channel.ack(data);
   });
   return res.status(200).send({
     success: true,
     message: "order received",
-    data: order,
+    data: order ? order : "Order is pending",
   });
 });
 
